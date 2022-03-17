@@ -1,4 +1,4 @@
-/* TODO: name and PennKeys of all group members here */
+/* TODO: Vishnu Priya Ammina (amminavp) and Jackson Meyer - Lee (jmeye) */
 
 `timescale 1ns / 1ps
 
@@ -44,6 +44,106 @@ module lc4_processor
     * You do not need to resynthesize and re-implement if this is all you change;
     * just restart the simulation.
     */
+
+
+wire [15:0] F_pc, D_pc, X_pc, M_pc, W_pc;
+wire [2:0] D_stall, X_stall, M_stall, W_stall;
+
+
+//PC
+wire [15:0] pc_inc, next_pc;
+
+cla16 inc_pc (.a(F_pc), .b(0), .cin(1), .sum(pc_inc));
+assign next_pc = pc_inc;
+
+
+
+//Fetch
+Nbit_reg #(16, 16'h8200) REG_in_F_pc (.in(next_pc), .out(F_pc), .clk(clk), .we(reg_we), .gwe(gwe), .rst(rst));
+
+Nbit_reg #(16) REG_F_D_pc (.in(F_pc), .out(D_pc), .clk(clk), .we(reg_we), .gwe(gwe), .rst(rst));
+Nbit_reg #(2, 2'd2) REG_F_D_stall (.in(2'h0), .out(D_stall), .clk(clk), .we(1), .gwe(gwe), .rst(rst));
+
+
+//Decode
+ 
+wire [2:0] decode_r1sel, decode_r2sel, decode_wsel;
+wire decode_r1re, decode_r2re, decode_regfile_we, decode_nzp_we, decode_select_pc_plus_one, decode_is_load, decode_is_store, decode_is_branch, decode_is_control_insn;
+
+lc4_decoder decoder (.insn(i_cur_insn), 
+      .r1sel(decode_r1sel), 
+      .r1re(decode_r1re), 
+      .r2sel(decode_r2sel),
+      .r2re(decode_r2re),
+      .wsel(decode_wsel),
+      .regfile_we(decode_regfile_we),
+      .nzp_we(decode_nzp_we),
+      .select_pc_plus_one(decode_select_pc_plus_one),
+      .is_load(decode_is_load),
+      .is_store(decode_is_store),
+      .is_branch(decode_is_branch),
+      .is_control_insn(decode_is_control_insn));
+
+wire [15:0] reg_rs_data, reg_rt_data, to_rd_data;
+
+lc4_regfile D_regfile (.clk(clk), .gwe(gwe), .rst(rst),
+      .i_rs(decode_r1sel),
+      .o_rs_data(reg_rs_data),
+      .i_rt(decode_r2sel),
+      .o_rt_data(reg_rt_data),
+      .i_rd(decode_wsel),
+      .i_wdata(to_rd_data),
+      .i_rd_we(decode_regfile_we));
+
+Nbit_reg #(16, 16'h8200) REG_D_X_pc (.in(D_pc), .out(X_pc), .clk(clk), .we(reg_we), .gwe(gwe), .rst(rst));
+Nbit_reg #(2, 2'd2) REG_D_X_stall (.in(D_stall), .out(X_stall), .clk(clk), .we(1), .gwe(gwe), .rst(rst));
+
+
+//Execute 
+ wire [15:0] alu_out;
+   
+lc4_alu alu (.i_insn(i_cur_insn),
+      .i_pc(X_pc),
+      .i_r1data(reg_rs_data),
+      .i_r2data(reg_rt_data),
+      .o_result(alu_out));
+
+
+assign to_rd_data = decode_is_load ? i_cur_dmem_data : decode_select_pc_plus_one ? next_pc : alu_out;
+
+Nbit_reg #(16, 16'h8200) REG_XM_pc (.in(X_pc), .out(M_pc), .clk(clk), .we(1), .gwe(gwe), .rst(rst));
+Nbit_reg #(2, 2'd2) REG_XM_stall (.in(X_stall), .out(M_stall), .clk(clk), .we(1), .gwe(gwe), .rst(rst));
+
+
+
+//Memory
+
+Nbit_reg #(16, 16'h8200) REG_MW_pc (.in(M_pc), .out(W_pc), .clk(clk), .we(1), .gwe(gwe), .rst(rst));
+Nbit_reg #(2, 2'd2) REG_MW_stall (.in(M_stall), .out(W_stall), .clk(clk), .we(1), .gwe(gwe), .rst(rst));
+
+
+//Write
+assign o_cur_pc = W_pc;
+assign o_dmem_addr = (decode_is_load || decode_is_store) ? alu_out : 0;
+assign o_dmem_we = decode_is_store;
+
+
+
+// TEST ASSIGNMENTS
+  assign test_stall = W_stall; 
+  assign test_cur_pc = W_pc;
+  assign test_cur_insn = i_cur_insn;
+  assign test_regfile_we = decode_regfile_we;
+  assign test_regfile_wsel = decode_wsel;
+  assign test_regfile_data = to_rd_data;
+  assign test_nzp_we = 1;
+  assign test_nzp_new_bits = !test_regfile_data ? 2 : test_regfile_data[15] ? 4 : 1;
+  assign test_dmem_we = o_dmem_we;
+  assign test_dmem_addr = o_dmem_addr;
+  assign test_dmem_data = i_cur_dmem_data;
+
+
+
 `ifndef NDEBUG
    always @(posedge gwe) begin
       // $display("%d %h %h %h %h %h", $time, f_pc, d_pc, e_pc, m_pc, test_cur_pc);
